@@ -140,12 +140,33 @@ ssim_metrices_history = {"epoch":[], "train ssim":[], "val ssim":[]}
 #======================================================================================
 # Validation loop definition
 #======================================================================================
+import wandb
+
+# Инициализация W&B
+wandb.init(
+    project='super_resolution',
+    name='training_run',
+    config={
+        "num_epochs": num_epochs,
+        "learning_rate": lr,
+        "batch_size": batch_size,
+        "lambda_adv": lambda_adv,
+        "lambda_pixel": lambda_pixel,
+        "lambda_lpips": lambda_lpips,
+        "residual_blocks": residual_blocks
+    }
+)
+
+# Логирование модели
+wandb.watch(generator, log="all")
+wandb.watch(discriminator, log="all")
+
 def val(epoch_num):
   generator.eval()
 
   epoch_val_psnr = MetricsCalculator()
   epoch_val_ssim = MetricsCalculator()
-
+  example_images = []
   with torch.no_grad():
       for iteration, samples in tqdm(enumerate(valid_loader)):
           imgs_lr, imgs_hr = samples
@@ -166,7 +187,9 @@ def val(epoch_num):
               imgs_lr = denormalize(imgs_lr).detach().cpu().permute(0,2,3,1).numpy().squeeze()
               imgs_hr = denormalize(imgs_hr).detach().cpu().permute(0,2,3,1).numpy().squeeze()
               gen_hr  = denormalize(gen_hr).detach().cpu().permute(0,2,3,1).numpy().squeeze()
-
+              example_images.append(wandb.Image(imgs_lr_denorm, caption="Low Resolution"))
+              example_images.append(wandb.Image(gen_hr_denorm, caption="Generated High Resolution"))
+              example_images.append(wandb.Image(imgs_hr_denorm, caption="Original High Resolution"))
               f, ax1 = plt.subplots(3, figsize=(14,14))
               ax1[0].set_title('LR Image')
               ax1[1].set_title('Predicted HR Image')
@@ -177,7 +200,9 @@ def val(epoch_num):
               ax1[2].imshow((imgs_hr*255).astype(np.uint8))
               f.tight_layout()
               plt.savefig(os.path.join(output_dir, 'fig_{}_{}.png'.format(epoch_num, iteration)), dpi=500)
-
+  wandb.log({
+        "Validation Images": example_images
+    }, step=epoch_num)
   generator.train()
   return epoch_val_psnr, epoch_val_ssim
 #======================================================================================
@@ -265,7 +290,14 @@ for epoch in range(num_epochs):
         epoch_train_loss_D.update(loss_D.detach().item())
         loss_D.backward()
         optimizer_D.step()
-
+    wandb.log({
+        "epoch": epoch + 1,
+        "train_loss_G": epoch_train_loss.avg,
+        "train_loss_D": epoch_train_loss_D.avg,
+        "val_psnr": epoch_val_psnr.avg,
+        "val_ssim": epoch_val_ssim.avg,
+        "learning_rate": optimizer_G.param_groups[0]['lr']
+    })
     state = {'epoch': (epoch+1),'state_dict': generator.state_dict(),
                  'optimizer':  optimizer_G.state_dict(),'loss': epoch_train_loss.avg}
     #======================================================================================
@@ -275,7 +307,7 @@ for epoch in range(num_epochs):
 
     scheduler.step(epoch_train_loss.avg)
     epoch_end_time = time.time() - epoch_start_time
-
+    
     if epoch%5==0 :
         torch.save(state, os.path.join(saved_weights_dir, 'model_{}.pt'.format(epoch+1)))
         print("Intermediate weights saved")
@@ -310,7 +342,7 @@ for epoch in range(num_epochs):
     list(getattr(tqdm, '_instances'))
     for instance in list(tqdm._instances):
         tqdm._decr_instances(instance)
-
+wandb.finish()
 total_end_time = time.time() - total_start_time
 print("Training completed ! Time taken {}".format(total_end_time))
 # Copy output data to CSV files
