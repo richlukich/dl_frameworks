@@ -45,8 +45,8 @@ print('Using device: %s'%device)
 # Directories to local files
 #======================================================================================
 # Used for dataloader
-path_imgs = 'DIV2K_train_HR'
-test_hr = 'DIV2K_valid_HR'
+path_imgs = '/root/.cache/kagglehub/datasets/joe1995/div2k-dataset/versions/1/DIV2K_train_HR/DIV2K_train_HR'
+test_hr = '/root/.cache/kagglehub/datasets/joe1995/div2k-dataset/versions/1/DIV2K_valid_HR/DIV2K_valid_HR'
 local_path = ""
 
 
@@ -184,12 +184,12 @@ def val(epoch_num):
           # Visualise output after every 10th epoch
           if(epoch_num%1== 0 and iteration%10==0):
 
-              imgs_lr = denormalize(imgs_lr).detach().cpu().permute(0,2,3,1).numpy().squeeze()
-              imgs_hr = denormalize(imgs_hr).detach().cpu().permute(0,2,3,1).numpy().squeeze()
-              gen_hr  = denormalize(gen_hr).detach().cpu().permute(0,2,3,1).numpy().squeeze()
-              example_images.append(wandb.Image(imgs_lr_denorm, caption="Low Resolution"))
-              example_images.append(wandb.Image(gen_hr_denorm, caption="Generated High Resolution"))
-              example_images.append(wandb.Image(imgs_hr_denorm, caption="Original High Resolution"))
+              imgs_lr = denormalize(imgs_lr).detach().cpu().permute(0,2,3,1).numpy()[0]
+              imgs_hr = denormalize(imgs_hr).detach().cpu().permute(0,2,3,1).numpy()[0]
+              gen_hr  = denormalize(gen_hr).detach().cpu().permute(0,2,3,1).numpy()[0]
+              example_images.append(wandb.Image((imgs_lr[0]*255).astype(np.uint8), caption="Low Resolution"))
+              example_images.append(wandb.Image((gen_hr[0]*255).astype(np.uint8), caption="Generated High Resolution"))
+              example_images.append(wandb.Image((imgs_hr[0]*255).astype(np.uint8), caption="Original High Resolution"))
               f, ax1 = plt.subplots(3, figsize=(14,14))
               ax1[0].set_title('LR Image')
               ax1[1].set_title('Predicted HR Image')
@@ -211,6 +211,7 @@ def val(epoch_num):
 best_loss = 1000
 get_lpips = lpips.LPIPS(net='alex').to(device)
 for epoch in range(num_epochs):
+    
     epoch_start_time = time.time()
 
     epoch_train_loss = MetricsCalculator()
@@ -290,6 +291,13 @@ for epoch in range(num_epochs):
         epoch_train_loss_D.update(loss_D.detach().item())
         loss_D.backward()
         optimizer_D.step()
+    
+    state = {'epoch': (epoch+1),'state_dict': generator.state_dict(),
+                 'optimizer':  optimizer_G.state_dict(),'loss': epoch_train_loss.avg}
+    #======================================================================================
+    # Validation loop
+    #======================================================================================
+    epoch_val_psnr, epoch_val_ssim = val(epoch+1)
     wandb.log({
         "epoch": epoch + 1,
         "train_loss_G": epoch_train_loss.avg,
@@ -298,13 +306,6 @@ for epoch in range(num_epochs):
         "val_ssim": epoch_val_ssim.avg,
         "learning_rate": optimizer_G.param_groups[0]['lr']
     })
-    state = {'epoch': (epoch+1),'state_dict': generator.state_dict(),
-                 'optimizer':  optimizer_G.state_dict(),'loss': epoch_train_loss.avg}
-    #======================================================================================
-    # Validation loop
-    #======================================================================================
-    epoch_val_psnr, epoch_val_ssim = val(epoch+1)
-
     scheduler.step(epoch_train_loss.avg)
     epoch_end_time = time.time() - epoch_start_time
     
