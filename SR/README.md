@@ -1,0 +1,1 @@
+![Figure 6 Example](fig_6_0.png)
